@@ -19,7 +19,8 @@ pub enum OperandTy {
     Data3,
     Mask8,
     BitOffset,
-    RelOffset(i16)
+    RelOffset(i16),
+    Irange2(u8)
 }
 
 impl OperandTy {
@@ -42,6 +43,10 @@ impl OperandTy {
 
     pub fn data16(mem: &[u8]) -> Self {
         Self::Data16(u16::from_le_bytes(mem[0..2].try_into().unwrap()))
+    }
+
+    pub fn irange2(mem: &[u8]) -> Self {
+        Self::Irange2(mem[0])
     }
 }
 
@@ -112,6 +117,9 @@ pub enum Instruction {
     ANDB,
     SHL,
     SHR,
+
+    NOP,
+    EXTR
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -135,13 +143,25 @@ impl InstructionInfo {
             x if x & 0x0F == 0x0E => { (Instruction::BCLR, vec![OperandTy::BitOffset]) }
             x if x & 0x0F == 0x0F => { (Instruction::BSET, vec![OperandTy::BitOffset]) }
 
+            0xCC => { (Instruction::NOP, vec![]) }
+            0xD1 => { (Instruction::EXTR, vec![OperandTy::irange2(&ptr[1..])]) }
+
             0xEA => (Instruction::JMPA, vec![ OperandTy::CC, OperandTy::caddr(&ptr[2..]) ]),
             0xFA => (Instruction::JMPS, vec![ OperandTy::seg(&ptr[1..]), OperandTy::caddr(&ptr[2..]) ]),
 
-            _ => return None
-        };
+            x => {
+                eprintln!("Unknown Instruction 0x{:02X?}", x);
+                return None
+            }
+        };  
 
         let mut size = 1;
+
+        // Exception for NOP (2 bytes but no additional operands)
+        if *i == 0xCC {
+            size = 2;
+        }
+
         for o in &operands {
             size += o.get_size_bytes();
         }

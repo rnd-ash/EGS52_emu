@@ -1,22 +1,41 @@
-use self::instructions::{InstructionInfo, OperandTy};
+use std::{cell::RefCell, rc::Rc, borrow::BorrowMut};
+
+use self::{instructions::{InstructionInfo, OperandTy, Instruction}, register::{Register, esfr_registers, sfr_registers}};
 
 mod instructions;
+mod register;
 
 ///! Infineon C167 emulator
 
 
 pub struct C167 {
     current_offset: usize,
+    mem: [u8; 0xFFFF],
     flash: Vec<u8>,
-    
+    sfr_registers: [Option<Register>; 256],
+    esfr_registers: [Option<Register>; 256],
+    extr_value: u8
 }
 
 impl C167 {
 
     pub fn new(flash: Vec<u8>) -> Self {
+
+        let mem = [0; 0xFFFF];
+        let rc = Rc::new(RefCell::new(mem));
+
+        let sfr_registers = sfr_registers(rc.clone());
+
+        let esfr_registers = esfr_registers(rc);
+
+
         let mut f = Self {
+            mem,
             current_offset: 0x80000,
-            flash: vec![0; 0x80000]
+            flash: vec![0; 0x80000],
+            sfr_registers,
+            esfr_registers,
+            extr_value: 0
         };
         f.flash.extend_from_slice(&flash);
         f
@@ -30,9 +49,10 @@ impl C167 {
         }
     }
 
-    pub fn process_instruction(&mut self, ins: InstructionInfo) {
-        match ins.instruction {
-            instructions::Instruction::MOV => todo!(),
+    pub fn process_instruction(&mut self, ins: InstructionInfo) {  
+        let i = ins.instruction;      
+        match i {
+            instructions::Instruction::MOV => self.mov(ins),
             instructions::Instruction::ADD => todo!(),
             instructions::Instruction::ADDB => todo!(),
             instructions::Instruction::MUL => todo!(),
@@ -62,9 +82,47 @@ impl C167 {
             instructions::Instruction::ANDB => todo!(),
             instructions::Instruction::SHL => todo!(),
             instructions::Instruction::SHR => todo!(),
+            instructions::Instruction::NOP => {} // Nothing
+            instructions::Instruction::EXTR => self.extr(ins)
+        }
+        if self.extr_value > 0 && i != Instruction::EXTR {
+            self.extr_value -= 1;
         }
     }
 
+    pub fn extr(&mut self, ins: InstructionInfo) {
+        assert!(ins.operands.len() == 1);
+        let v = ins.instruction_raw[1];
+        // TODO - Disable interrupts
+        if v >= 1 && v <= 4 {
+            self.extr_value = v;
+        } else {
+            self.extr_value = 1;
+        }
+    }
+
+    pub fn mov(&mut self, ins: InstructionInfo) {
+        assert!(ins.operands.len() == 2);
+        match ins.operands[0] {
+            // Reg, Data
+
+            OperandTy::Reg(reg_id) => {
+                let reg = match self.extr_value {
+                    0 => self.sfr_registers[reg_id as usize].as_mut().unwrap(),
+                    _ => self.esfr_registers[reg_id as usize].as_mut().unwrap(),
+                };
+                if let OperandTy::Data16(value) = ins.operands[1] {
+                    reg.set_value(value.to_le_bytes())
+                } else {
+                    todo!("MOV into Register with operand type {:?}", ins.operands[1])
+                }
+            },
+            OperandTy::Caddr(_) => todo!(),
+            OperandTy::Seg(_) => todo!(),
+            OperandTy::Data16(_) => todo!(),
+            _ => panic!("Invalid operand for MOV")
+        }
+    }
 
     pub fn jumpa(&mut self, ins: InstructionInfo) {
         // CC, CADDR
