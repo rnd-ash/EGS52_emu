@@ -1,13 +1,11 @@
 use std::{borrow::BorrowMut, cell::{RefCell, Ref}, rc::Rc};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Register {
     pub name: &'static str,
     addr_16: u16,
     mem_buffer: Rc<RefCell<[u8; 0xFFFF]>>
 }
-
-
 
 impl Register {
     pub fn new(name: &'static str, inital_value: Option<u16>, addr_16: u16, mem: Rc<RefCell<[u8; 0xFFFF]>>) -> Self {
@@ -23,16 +21,24 @@ impl Register {
     }
 
     pub fn get_raw(&self) -> [u8; 2] {
-        let b = self.mem_buffer.borrow();
+        let b = loop {
+            match self.mem_buffer.try_borrow() {
+                Ok(v) => break v,
+                _ => {}
+            }
+        };
+        //let b = self.mem_buffer.borrow();
         b.as_ref()[self.addr_16 as usize..self.addr_16 as usize +2].try_into().unwrap()
     }
 
     pub fn set_value(&mut self, v: [u8; 2]) {
-        self.mem_buffer.borrow_mut().replace_with(|mut old| {
-            old[self.addr_16 as usize..self.addr_16 as usize +2].copy_from_slice(&v);
-            *old
-        });
         
+        loop {
+            if let Ok(mut m) = self.mem_buffer.try_borrow_mut() {
+                m[self.addr_16 as usize..self.addr_16 as usize +2].copy_from_slice(&v);
+                break;
+            }
+        }
     }
 
     pub fn get_value_u16(&self) -> u16 {
@@ -49,11 +55,45 @@ impl Register {
         self.set_value(old_value.to_le_bytes());
     }
 
+    pub fn sub_signed(&mut self, v: i16) {
+        let mut old_value = self.get_value_i16();
+        old_value = old_value.wrapping_sub(v);
+        self.set_value(old_value.to_le_bytes());
+    }
+
     pub fn add_unsigned(&mut self, v: u16) {
         let mut old_value = self.get_value_u16();
         old_value = old_value.wrapping_add(v);
         self.set_value(old_value.to_le_bytes());
     }
+
+    pub fn sub_unsigned(&mut self, v: u16) {
+        let mut old_value = self.get_value_u16();
+        old_value = old_value.wrapping_sub(v);
+        self.set_value(old_value.to_le_bytes());
+    }
+
+    /// ONLY for GPR registers
+    pub fn set_addr(&mut self, addr: u16) {
+        self.addr_16 = addr;
+    }
+
+    /// Only for GPR byte registers
+    pub fn get_u8(&self) -> u8 {
+        self.get_raw()[0]
+    }
+
+    /// Only for GPR byte registers
+    pub fn set_u8(&mut self, v: u8) {
+        let mut old = self.get_raw();
+        old[0] = v;
+        self.set_value(old);
+    }
+
+    pub fn get_addr(&self) -> u16 {
+        self.addr_16
+    }
+
 }
 
 pub fn sfr_registers<'a>(mem: Rc<RefCell<[u8; 0xFFFF]>>) -> [Option<Register>; 256] {
@@ -377,14 +417,14 @@ pub fn esfr_registers<'a>(mem: Rc<RefCell<[u8; 0xFFFF]>>) -> [Option<Register>; 
         None, // 0xF02C
         None, // 0xF02E
 
-        None, // 0xF030
-        None, // 0xF032
-        None, // 0xF034
-        None, // 0xF036
-        None, // 0xF038
-        None, // 0xF03A
-        None, // 0xF03C
-        None, // 0xF03E
+        Some(Register::new("PT0", Some(0x0000), 0xF030, mem.clone())), // 0xF030
+        Some(Register::new("PT1", Some(0x0000), 0xF032, mem.clone())), // 0xF032
+        Some(Register::new("PT2", Some(0x0000), 0xF034, mem.clone())), // 0xF034
+        Some(Register::new("PT3", Some(0x0000), 0xF036, mem.clone())), // 0xF036
+        Some(Register::new("PP0", Some(0x0000), 0xF038, mem.clone())), // 0xF038
+        Some(Register::new("PP1", Some(0x0000), 0xF03A, mem.clone())), // 0xF03A
+        Some(Register::new("PP2", Some(0x0000), 0xF03C, mem.clone())), // 0xF03C
+        Some(Register::new("PP3", Some(0x0000), 0xF03E, mem.clone())), // 0xF03E
 
         None, // 0xF040
         None, // 0xF042
@@ -395,10 +435,10 @@ pub fn esfr_registers<'a>(mem: Rc<RefCell<[u8; 0xFFFF]>>) -> [Option<Register>; 
         None, // 0xF04C
         None, // 0xF04E
 
-        None, // 0xF050
-        None, // 0xF052
-        None, // 0xF054
-        None, // 0xF056
+        Some(Register::new("T7", Some(0x0000), 0xF050, mem.clone())), // 0xF050
+        Some(Register::new("T8", Some(0x0000), 0xF052, mem.clone())), // 0xF052
+        Some(Register::new("T7REL", Some(0x0000), 0xF054, mem.clone())), // 0xF054
+        Some(Register::new("T8REL", Some(0x0000), 0xF056, mem.clone())), // 0xF056
         None, // 0xF058
         None, // 0xF05A
         None, // 0xF05C
@@ -416,23 +456,23 @@ pub fn esfr_registers<'a>(mem: Rc<RefCell<[u8; 0xFFFF]>>) -> [Option<Register>; 
         None, // 0xF070
         None, // 0xF072
         None, // 0xF074
-        None, // 0xF076
-        None, // 0xF078
-        None, // 0xF07A
-        None, // 0xF07C
-        None, // 0xF07E
+        Some(Register::new("IDMEM2", Some(0x0000), 0xF076, mem.clone())), // 0xF076
+        Some(Register::new("IDPROG", Some(0x0000), 0xF078, mem.clone())), // 0xF078
+        Some(Register::new("IDMEM", Some(0x0000), 0xF07A, mem.clone())), // 0xF07A
+        Some(Register::new("IDCHIP", Some(0x0000), 0xF07C, mem.clone())), // 0xF07C
+        Some(Register::new("IDMANUF", Some(0x0000), 0xF07E, mem.clone())), // 0xF07E
 
-        None, // 0xF080
-        None, // 0xF082
-        None, // 0xF084
-        None, // 0xF086
-        None, // 0xF088
-        None, // 0xF08A
-        None, // 0xF08C
-        None, // 0xF08E
+        Some(Register::new("PCON0L", Some(0x0000), 0xF080, mem.clone())), // 0xF080
+        Some(Register::new("PCON0H", Some(0x0000), 0xF082, mem.clone())), // 0xF082
+        Some(Register::new("PCON1L", Some(0x0000), 0xF084, mem.clone())), // 0xF084
+        Some(Register::new("PCON1H", Some(0x0000), 0xF086, mem.clone())), // 0xF086
+        Some(Register::new("PCON2", Some(0x0000), 0xF088, mem.clone())), // 0xF088
+        Some(Register::new("PCON3", Some(0x0000), 0xF08A, mem.clone())), // 0xF08A
+        Some(Register::new("PCON4", Some(0x0000), 0xF08C, mem.clone())), // 0xF08C
+        Some(Register::new("PCON6", Some(0x0000), 0xF08E, mem.clone())), // 0xF08E
 
-        None, // 0xF090
-        None, // 0xF092
+        Some(Register::new("PCON7", Some(0x0000), 0xF090, mem.clone())), // 0xF090
+        Some(Register::new("PCON8", Some(0x0000), 0xF092, mem.clone())), // 0xF092
         None, // 0xF094
         None, // 0xF096
         None, // 0xF098
@@ -445,13 +485,13 @@ pub fn esfr_registers<'a>(mem: Rc<RefCell<[u8; 0xFFFF]>>) -> [Option<Register>; 
         None, // 0xF0A4
         None, // 0xF0A6
         None, // 0xF0A8
-        None, // 0xF0AA
+        Some(Register::new("PCON20", Some(0x0000), 0xF0AA, mem.clone())), // 0xF0AA
         None, // 0xF0AC
-        None, // 0xF0AE
+        Some(Register::new("PCTR", Some(0x0000), 0xF0AE, mem.clone())), // 0xF0AE
 
-        None, // 0xF0B0
-        None, // 0xF0B2
-        None, // 0xF0B4
+        Some(Register::new("SSCTB", Some(0x0000), 0xF0B0, mem.clone())), // 0xF0B0
+        Some(Register::new("SSCRB", Some(0x0000), 0xF0B2, mem.clone())), // 0xF0B2
+        Some(Register::new("SSCBR", Some(0x0000), 0xF0B4, mem.clone())), // 0xF0B4
         None, // 0xF0B6
         None, // 0xF0B8
         None, // 0xF0BA
@@ -467,10 +507,10 @@ pub fn esfr_registers<'a>(mem: Rc<RefCell<[u8; 0xFFFF]>>) -> [Option<Register>; 
         None, // 0xF0CC
         None, // 0xF0CE
 
-        None, // 0xF0D0
-        None, // 0xF0D2
-        None, // 0xF0D4
-        None, // 0xF0D6
+        Some(Register::new("T14REL", Some(0x0000), 0xF0D0, mem.clone())), // 0xF0D0
+        Some(Register::new("T14", Some(0x0000), 0xF0D2, mem.clone())), // 0xF0D2
+        Some(Register::new("RTCL", Some(0x0000), 0xF0D4, mem.clone())), // 0xF0D4
+        Some(Register::new("RTCH", Some(0x0000), 0xF0D6, mem.clone())), // 0xF0D6
         None, // 0xF0D8
         None, // 0xF0DA
         None, // 0xF0DC
@@ -494,11 +534,11 @@ pub fn esfr_registers<'a>(mem: Rc<RefCell<[u8; 0xFFFF]>>) -> [Option<Register>; 
         None, // 0xF0FC
         None, // 0xF0FE
 
-        None, // 0xF100
-        None, // 0xF102
-        None, // 0xF104
-        None, // 0xF106
-        None, // 0xF108
+        Some(Register::new("DP0L", Some(0x0000), 0xF100, mem.clone())), // 0xF100
+        Some(Register::new("DP0H", Some(0x0000), 0xF102, mem.clone())), // 0xF102
+        Some(Register::new("DP1L", Some(0x0000), 0xF104, mem.clone())), // 0xF104
+        Some(Register::new("DP1H", Some(0x0000), 0xF106, mem.clone())), // 0xF106
+        Some(Register::new("RP0H", Some(0x0000), 0xF108, mem.clone())), // 0xF108
         None, // 0xF10A
         None, // 0xF10C
         None, // 0xF10E
@@ -548,41 +588,41 @@ pub fn esfr_registers<'a>(mem: Rc<RefCell<[u8; 0xFFFF]>>) -> [Option<Register>; 
         None, // 0xF15C
         None, // 0xF15E
 
-        None, // 0xF160
-        None, // 0xF162
-        None, // 0xF164
-        None, // 0xF166
-        None, // 0xF168
-        None, // 0xF16A
-        None, // 0xF16C
-        None, // 0xF16E
+        Some(Register::new("CC16IC", Some(0x0000), 0xF160, mem.clone())), // 0xF160
+        Some(Register::new("CC17IC", Some(0x0000), 0xF162, mem.clone())), // 0xF162
+        Some(Register::new("CC18IC", Some(0x0000), 0xF164, mem.clone())), // 0xF164
+        Some(Register::new("CC19IC", Some(0x0000), 0xF166, mem.clone())), // 0xF166
+        Some(Register::new("CC20IC", Some(0x0000), 0xF168, mem.clone())), // 0xF168
+        Some(Register::new("CC21IC", Some(0x0000), 0xF16A, mem.clone())), // 0xF16A
+        Some(Register::new("CC22IC", Some(0x0000), 0xF16C, mem.clone())), // 0xF16C
+        Some(Register::new("CC23IC", Some(0x0000), 0xF16E, mem.clone())), // 0xF16E
 
-        None, // 0xF170
-        None, // 0xF172
-        None, // 0xF174
-        None, // 0xF176
-        None, // 0xF178
-        None, // 0xF17A
-        None, // 0xF17C
-        None, // 0xF17E
+        Some(Register::new("CC24IC", Some(0x0000), 0xF170, mem.clone())), // 0xF170
+        Some(Register::new("CC25IC", Some(0x0000), 0xF172, mem.clone())), // 0xF172
+        Some(Register::new("CC26IC", Some(0x0000), 0xF174, mem.clone())), // 0xF174
+        Some(Register::new("CC27IC", Some(0x0000), 0xF176, mem.clone())), // 0xF176
+        Some(Register::new("CC28IC", Some(0x0000), 0xF178, mem.clone())), // 0xF178
+        Some(Register::new("T7IC", Some(0x0000), 0xF17A, mem.clone())), // 0xF17A
+        Some(Register::new("T8IC", Some(0x0000), 0xF17C, mem.clone())), // 0xF17C
+        Some(Register::new("PWMIC", Some(0x0000), 0xF17E, mem.clone())), // 0xF17E
 
         None, // 0xF180
         None, // 0xF182
-        None, // 0xF184
-        None, // 0xF186
+        Some(Register::new("CC29IC", Some(0x0000), 0xF184, mem.clone())), // 0xF184
+        Some(Register::new("XP0IC", Some(0x0000), 0xF186, mem.clone())), // 0xF186
         None, // 0xF188
         None, // 0xF18A
-        None, // 0xF18C
-        None, // 0xF18E
+        Some(Register::new("CC30IC", Some(0x0000), 0xF18C, mem.clone())), // 0xF18C
+        Some(Register::new("XP1IC", Some(0x0000), 0xF18E, mem.clone())), // 0xF18E
 
         None, // 0xF190
         None, // 0xF192
-        None, // 0xF194
-        None, // 0xF196
+        Some(Register::new("CC31IC", Some(0x0000), 0xF194, mem.clone())), // 0xF194
+        Some(Register::new("XP2IC", Some(0x0000), 0xF196, mem.clone())), // 0xF196
         None, // 0xF198
         None, // 0xF19A
-        None, // 0xF19C
-        None, // 0xF19E
+        Some(Register::new("S0TBIC", Some(0x0000), 0xF19C, mem.clone())), // 0xF19C
+        Some(Register::new("XP3IC", Some(0x0000), 0xF19E, mem.clone())), // 0xF19E
 
         None, // 0xF1A0
         None, // 0xF1A2
@@ -596,31 +636,31 @@ pub fn esfr_registers<'a>(mem: Rc<RefCell<[u8; 0xFFFF]>>) -> [Option<Register>; 
         None, // 0xF1B0
         None, // 0xF1B2
         None, // 0xF1B4
-        None, // 0xF1B6
+        Some(Register::new("XP2IC", Some(0x0000), 0xF1B6, mem.clone())), // 0xF1B6
         None, // 0xF1B8
         None, // 0xF1BA
         None, // 0xF1BC
-        None, // 0xF1BE
+        Some(Register::new("XP3IC", Some(0x0000), 0xF1BE, mem.clone())), // 0xF1BE
 
-        None, // 0xF1C0
-        None, // 0xF1C2
-        None, // 0xF1C4
-        None, // 0xF1C6
+        Some(Register::new("EXICON", Some(0x0000), 0xF1C0, mem.clone())), // 0xF1C0
+        Some(Register::new("OPD2", Some(0x0000), 0xF1C2, mem.clone())), // 0xF1C2
+        Some(Register::new("PICON", Some(0x0000), 0xF1C4, mem.clone())), // 0xF1C4
+        Some(Register::new("ODP3", Some(0x0000), 0xF1C6, mem.clone())), // 0xF1C6
         None, // 0xF1C8
-        None, // 0xF1CA
+        Some(Register::new("ODP4", Some(0x0000), 0xF1CA, mem.clone())), // 0xF1CA
         None, // 0xF1CC
-        None, // 0xF1CE
+        Some(Register::new("ODP6", Some(0x0000), 0xF1CE, mem.clone())), // 0xF1CE
 
-        None, // 0xF1D0
-        None, // 0xF1D2
-        None, // 0xF1D4
-        None, // 0xF1D6
+        Some(Register::new("SYSCON2", Some(0x0000), 0xF1D0, mem.clone())), // 0xF1D0
+        Some(Register::new("ODP7", Some(0x0000), 0xF1D2, mem.clone())), // 0xF1D2
+        Some(Register::new("SYSCON3", Some(0x0000), 0xF1D4, mem.clone())), // 0xF1D4
+        Some(Register::new("ODP8", Some(0x0000), 0xF1D6, mem.clone())), // 0xF1D6
         None, // 0xF1D8
-        None, // 0xF1DA
-        None, // 0xF1DC
-        None, // 0xF1DE
+        Some(Register::new("EXISEL", Some(0x0000), 0xF1DA, mem.clone())), // 0xF1DA
+        Some(Register::new("SYSCON1", Some(0x0000), 0xF1DC, mem.clone())), // 0xF1DC
+        Some(Register::new("ISNC", Some(0x0000), 0xF1DE, mem.clone())), // 0xF1DE
 
-        None, // 0xF1E0
+        Some(Register::new("RSTCON", Some(0x0000), 0xF1E0, mem.clone())), // 0xF1E0
         None, // 0xF1E2
         None, // 0xF1E4
         None, // 0xF1E6

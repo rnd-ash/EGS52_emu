@@ -1,9 +1,12 @@
 mod c167;
+mod gui;
 
 use std::{fs::File, io::Read};
 
 use c167::C167;
 use clap::Parser;
+use eframe::NativeOptions;
+use gui::App;
 
 #[derive(Debug, Clone, Parser)]
 pub struct Settings {
@@ -16,6 +19,11 @@ fn main() {
     let mut buffer = Vec::new();
     f.read_to_end(&mut buffer);
 
-    let mut c167 = C167::new(buffer);
-    c167.run();
+    let c167 = C167::new(buffer);
+    
+    let app = App::new(c167);
+
+    let na = NativeOptions::default();
+
+    eframe::run_native("EGS52 simulator", na, Box::new(|cc| Box::new(app)));
 }
