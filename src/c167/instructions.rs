@@ -1,3 +1,5 @@
+use super::SEGMENT_SIZE;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum JumpType {
     UC,
@@ -131,12 +133,11 @@ pub struct InstructionInfo {
 }
 
 impl InstructionInfo {
-    pub fn from_bytes(src: &[u8], offset: usize) -> Option<(Self, usize)> {
+    pub fn from_bytes(src: &[u8], csp: u8, ip: u16) -> Option<(Self, u16)> {
+
+        let offset = (csp as usize * SEGMENT_SIZE) + ip as usize;
 
         let ptr = &src[offset..];
-
-
-
         let i = ptr.get(0)?;
 
         let size = match *i & 0x0F {
@@ -147,28 +148,31 @@ impl InstructionInfo {
 
         let instruction = match *i {
             0x00 => Instruction::ADD,
-            0x01 => Instruction::ADDB,
             0x02 => Instruction::ADD,
-            0x03 => Instruction::ADDB,
             0x04 => Instruction::ADD,
-            0x05 => Instruction::ADDB,
             0x06 => Instruction::ADD,
-            0x07 => Instruction::ADDB,
             0x08 => Instruction::ADD,
+
+            0x01 => Instruction::ADDB,
+            0x03 => Instruction::ADDB,
+            0x05 => Instruction::ADDB,
+            0x07 => Instruction::ADDB,
             0x09 => Instruction::ADDB,
+
             0x0A => Instruction::BFLDL,
             0x0B => Instruction::MUL,
             0x0C => Instruction::ROL,
 
             0x10 => Instruction::ADDC,
-            0x11 => Instruction::ADDCB,
             0x12 => Instruction::ADDC,
-            0x13 => Instruction::ADDCB,
             0x14 => Instruction::ADDC,
-            0x15 => Instruction::ADDCB,
             0x16 => Instruction::ADDC,
-            0x17 => Instruction::ADDCB,
             0x18 => Instruction::ADDC,
+
+            0x11 => Instruction::ADDCB,
+            0x13 => Instruction::ADDCB,
+            0x15 => Instruction::ADDCB,
+            0x17 => Instruction::ADDCB,
             0x19 => Instruction::ADDCB,
             0x1A => Instruction::BFLDH,
             0x1B => Instruction::MULU,
@@ -381,9 +385,9 @@ impl InstructionInfo {
         
         Some((Self {
             offset,
-            size,
-            bytes: ptr[0..size].to_vec(),
+            size: size as usize,
+            bytes: ptr[0..size as usize].to_vec(),
             instruction,
-        }, offset + size))
+        },  ip + size))
     }
 }

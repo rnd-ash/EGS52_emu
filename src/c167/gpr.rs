@@ -1,6 +1,6 @@
 use std::{cell::RefCell, rc::Rc};
 
-use super::register::Register;
+use super::{register::Register, Memory};
 
 
 const GPR_REG_BYTE_NAMES: &'static [&'static str] = &[
@@ -49,51 +49,51 @@ pub struct GPRData {
 }
 
 impl GPRData {
-    pub fn new(mem: Rc<RefCell<[u8; 0xFFFF]>>) -> Self {
+    pub fn new(mem: &mut Memory) -> Self {
         Self {
             bytes: [
-                Register::new("RL0", None, 0xFC00, mem.clone()),
-                Register::new("RH0", None, 0xFC01, mem.clone()),
-                Register::new("RL1", None, 0xFC02, mem.clone()),
-                Register::new("RH1", None, 0xFC03, mem.clone()),
-                Register::new("RL2", None, 0xFC04, mem.clone()),
-                Register::new("RH2", None, 0xFC05, mem.clone()),
-                Register::new("RL3", None, 0xFC06, mem.clone()),
-                Register::new("RH3", None, 0xFC07, mem.clone()),
-                Register::new("RL4", None, 0xFC18, mem.clone()),
-                Register::new("RH4", None, 0xFC19, mem.clone()),
-                Register::new("RL5", None, 0xFC1A, mem.clone()),
-                Register::new("RH5", None, 0xFC1B, mem.clone()),
-                Register::new("RL6", None, 0xFC1C, mem.clone()),
-                Register::new("RH6", None, 0xFC1D, mem.clone()),
-                Register::new("RL7", None, 0xFC1E, mem.clone()),
-                Register::new("RH7", None, 0xFC1F, mem.clone())
+                Register::new("RL0", None, 0xFC00, mem),
+                Register::new("RH0", None, 0xFC01, mem),
+                Register::new("RL1", None, 0xFC02, mem),
+                Register::new("RH1", None, 0xFC03, mem),
+                Register::new("RL2", None, 0xFC04, mem),
+                Register::new("RH2", None, 0xFC05, mem),
+                Register::new("RL3", None, 0xFC06, mem),
+                Register::new("RH3", None, 0xFC07, mem),
+                Register::new("RL4", None, 0xFC18, mem),
+                Register::new("RH4", None, 0xFC19, mem),
+                Register::new("RL5", None, 0xFC1A, mem),
+                Register::new("RH5", None, 0xFC1B, mem),
+                Register::new("RL6", None, 0xFC1C, mem),
+                Register::new("RH6", None, 0xFC1D, mem),
+                Register::new("RL7", None, 0xFC1E, mem),
+                Register::new("RH7", None, 0xFC1F, mem)
             ],
             words: [
-                Register::new("R0", None, 0xFC00, mem.clone()),
-                Register::new("R1", None, 0xFC02, mem.clone()),
-                Register::new("R2", None, 0xFC04, mem.clone()),
-                Register::new("R3", None, 0xFC06, mem.clone()),
-                Register::new("R4", None, 0xFC08, mem.clone()),
-                Register::new("R5", None, 0xFC0A, mem.clone()),
-                Register::new("R6", None, 0xFC0C, mem.clone()),
-                Register::new("R7", None, 0xFC0E, mem.clone()),
-                Register::new("R8", None, 0xFC10, mem.clone()),
-                Register::new("R9", None, 0xFC12, mem.clone()),
-                Register::new("R10", None, 0xFC14, mem.clone()),
-                Register::new("R11", None, 0xFC16, mem.clone()),
-                Register::new("R12", None, 0xFC18, mem.clone()),
-                Register::new("R13", None, 0xFC1A, mem.clone()),
-                Register::new("R14", None, 0xFC1C, mem.clone()),
-                Register::new("R15", None, 0xFC1E, mem.clone())
+                Register::new("R0", None, 0xFC00, mem),
+                Register::new("R1", None, 0xFC02, mem),
+                Register::new("R2", None, 0xFC04, mem),
+                Register::new("R3", None, 0xFC06, mem),
+                Register::new("R4", None, 0xFC08, mem),
+                Register::new("R5", None, 0xFC0A, mem),
+                Register::new("R6", None, 0xFC0C, mem),
+                Register::new("R7", None, 0xFC0E, mem),
+                Register::new("R8", None, 0xFC10, mem),
+                Register::new("R9", None, 0xFC12, mem),
+                Register::new("R10", None, 0xFC14, mem),
+                Register::new("R11", None, 0xFC16, mem),
+                Register::new("R12", None, 0xFC18, mem),
+                Register::new("R13", None, 0xFC1A, mem),
+                Register::new("R14", None, 0xFC1C, mem),
+                Register::new("R15", None, 0xFC1E, mem)
             ],
             addr: 0xFC00
         }
     }
 
-    pub fn get_reg_by_id<'a>(&'a mut self, rid: u8) -> &'a mut Register {
+    pub fn get_reg_by_id(&self, rid: u8) -> Register {
         let idx = (rid & 0x0F) as usize;
-        &mut self.bytes[idx]
+        self.words[idx]
     }
 
     pub fn byte_reg_by_idx<'a>(&'a mut self, id: u8) -> &'a mut Register {
@@ -102,6 +102,10 @@ impl GPRData {
 
     pub fn word_reg_by_idx<'a>(&'a mut self, id: u8) -> &'a mut Register {
         &mut self.words[id as usize]
+    }
+
+    pub fn get_context_pointer(&self) -> u16 {
+        self.addr
     }
 
     pub fn set_context_pointer(&mut self, cp: u16) {

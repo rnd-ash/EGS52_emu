@@ -5,7 +5,7 @@ use std::{fs::File, io::Read};
 
 use c167::C167;
 use clap::Parser;
-use eframe::NativeOptions;
+use eframe::{NativeOptions, epaint::Vec2};
 use gui::App;
 
 #[derive(Debug, Clone, Parser)]
@@ -23,7 +23,8 @@ fn main() {
     
     let app = App::new(c167);
 
-    let na = NativeOptions::default();
+    let mut na = NativeOptions::default();
+    na.initial_window_size = Some(Vec2::new(1280.0, 720.0));
 
-    eframe::run_native("EGS52 simulator", na, Box::new(|cc| Box::new(app)));
+    eframe::run_native("EGS52 simulator", na, Box::new(|_| Box::new(app)));
 }
