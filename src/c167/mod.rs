@@ -234,7 +234,7 @@ pub struct C167 {
     esfr_registers: [Option<Register>; 256],
     pub extr_value: u8,
     pub extp_value: u8,
-    pub extp_page: u32,
+    pub extp_page: u16,
     gprs: GPRData,
     ins_exec: usize,
     peripherals_active: bool,
@@ -297,14 +297,19 @@ impl C167 {
     }
 
     fn get_mem_address(&self, mm_mm: u16) -> usize {
+        let offset = (mm_mm & 0x3FFF) as u32;
         // Can only be 0-3
         if self.extp_value == 0 {
-            let dpp_selection = (mm_mm & 0b1100_0000_0000_0000) >> 14;
-            let output_addr = (((self.get_sfr_reg(dpp_selection as u8).get_value_word_no_tracking(&self.mem) as usize) & 0x3FFF) << 14) | (mm_mm & 0x3FFF) as usize;
-            return output_addr as usize & 0xFFFFFF
+            let dpp_selection = mm_mm >> 14 & 0b11;
+            // only 10 bits from DPP are used
+            let dpp_value = (self.get_sfr_reg(dpp_selection as u8).get_value_word_no_tracking(&self.mem) & 0b1111_1111_11) as u32;  
+            let addr = dpp_value << 10 | offset;
+            return addr as usize;
         } else {
-            let addr = self.extp_page | (mm_mm as u32 & 0x3FFF);
-            return addr as usize & 0xFFFFFF;
+            // 10 bits from extp_page
+            let p = (self.extp_page & 0b1111_1111_11) as u32;
+            let addr = p << 10 | offset;
+            return addr as usize;
         }
     }
 
@@ -611,7 +616,6 @@ impl C167 {
             0xA8 => {
                 let addr_reg_n = self.gprs.word_reg_by_idx((ins.bytes[1] & 0xF0) >> 4).get_addr();
                 let value_reg_m = self.gprs.word_reg_by_idx(ins.bytes[1] & 0x0F).get_value_word(&mut self.mem);
-                println!("{:08X?} {:08X?}", value_reg_m, self.get_mem_address(value_reg_m));
                 let value = self.read_mem_word(self.get_mem_address(value_reg_m));
                 (addr_reg_n as usize, value)
             }
@@ -719,13 +723,13 @@ impl C167 {
 
     fn movb(&mut self, ins: &InstructionInfo) {
         let (dest_addr, to_move) = match ins.bytes[0] {
-            // Rwn <- Rwm 
+            // Rbn <- Rbm 
             0xF1 => {
                 let addr_reg_n = self.gprs.word_reg_by_idx((ins.bytes[1] & 0xF0) >> 4).get_addr();
                 let value_reg_m = self.gprs.word_reg_by_idx(ins.bytes[1] & 0x0F).get_byte(&mut self.mem);
                 (addr_reg_n as usize, value_reg_m)
             }
-            // Rwn <- #data4
+            // Rbn <- #data4
             0xE1 => {
                 let addr_reg_n = self.gprs.word_reg_by_idx((ins.bytes[1] & 0xF0) >> 4).get_addr();
                 let data_4 = (ins.bytes[1] & 0x0F) as u8;
@@ -737,14 +741,14 @@ impl C167 {
                 let data_8 = ins.bytes[1];
                 (addr_reg as usize, data_8)
             }
-            // Rwn <- [Rwm]
+            // Rbn <- [Rwm]
             0xA9 => {
                 let addr_reg_n = self.gprs.word_reg_by_idx((ins.bytes[1] & 0xF0) >> 4).get_addr();
                 let value_reg_m = self.gprs.word_reg_by_idx(ins.bytes[1] & 0x0F).get_value_word(&mut self.mem);
                 let value = self.read_mem_byte(self.get_mem_address(value_reg_m));
                 (addr_reg_n as usize, value)
             }
-            // Rwn <- [Rwm+]
+            // Rbn <- [Rwm+]
             0x99 => {
                 let addr_reg_n = self.gprs.word_reg_by_idx((ins.bytes[1] & 0xF0) >> 4).get_addr();
                 let mut value_reg_m = self.gprs.word_reg_by_idx(ins.bytes[1] & 0x0F).get_value_word(&mut self.mem);
@@ -753,13 +757,13 @@ impl C167 {
                 self.gprs.word_reg_by_idx(ins.bytes[1] & 0x0F).set_value_word(&mut self.mem, value_reg_m);
                 (addr_reg_n as usize, value)
             }
-            // [Rwm] <- Rwn
+            // [Rwm] <- Rbn
             0xB9 => {
                 let addr_ptr_m = self.gprs.word_reg_by_idx(ins.bytes[1] & 0x0F).get_value_word(&mut self.mem);
                 let reg_value_n = self.gprs.word_reg_by_idx((ins.bytes[1] & 0xF0) >> 4).get_byte(&mut self.mem);
                 (self.get_mem_address(addr_ptr_m), reg_value_n)
             }
-            // [-Rwm] <- Rwn
+            // [-Rwm] <- Rbn
             0x89 => {
                 let reg_value_n = self.gprs.word_reg_by_idx((ins.bytes[1] & 0xF0) >> 4).get_byte(&mut self.mem);
                 let mut addr_ptr_m = self.gprs.word_reg_by_idx(ins.bytes[1] & 0x0F).get_value_word(&mut self.mem);
@@ -792,21 +796,21 @@ impl C167 {
                 self.gprs.word_reg_by_idx(ins.bytes[1] & 0x0F).set_value_word(&mut self.mem, addr_ptr_m+1);
                 (self.get_mem_address(addr_ptr_n), value_at_m)
             }
-            // Rwn <- [Rwm + data16]
+            // Rbn <- [Rwm + data16]
             0xF4 => {
                 let addr_ptr_m = self.gprs.word_reg_by_idx(ins.bytes[1] & 0x0F).get_value_word(&mut self.mem);
                 let addr_reg_n = self.gprs.word_reg_by_idx((ins.bytes[1] & 0xF0) >> 4).get_addr();
-                let inc = u16::from_le_bytes(ins.bytes[2..].try_into().unwrap());
+                let inc = u16::from_le_bytes(ins.bytes[2..].try_into().unwrap()) & 0xFF;
                 let value_at_m = self.read_mem_byte(self.get_mem_address(addr_ptr_m));
                 // Increase pointer after access
                 self.gprs.word_reg_by_idx(ins.bytes[1] & 0x0F).set_value_word(&mut self.mem, addr_ptr_m+inc);
                 (addr_reg_n as usize, value_at_m)
             }
-            // [Rwm + data16] <- Rwn
+            // [Rwm + data16] <- Rbn
             0xE4 => {
                 let addr_ptr_m = self.gprs.word_reg_by_idx(ins.bytes[1] & 0x0F).get_value_word(&mut self.mem);
                 let value_at_n = self.gprs.word_reg_by_idx((ins.bytes[1] & 0xF0) >> 4).get_byte(&mut self.mem);
-                let inc = u16::from_le_bytes(ins.bytes[2..].try_into().unwrap());
+                let inc = u16::from_le_bytes(ins.bytes[2..].try_into().unwrap()) & 0xFF;
                 // Increase pointer after access
                 self.gprs.word_reg_by_idx(ins.bytes[1] & 0x0F).set_value_word(&mut self.mem, addr_ptr_m+inc);
                 (self.get_mem_address(addr_ptr_m), value_at_n)
@@ -1013,14 +1017,20 @@ impl C167 {
     }
 
     fn extp(&mut self, ins: &InstructionInfo) {
+        let is_extended_seg = ins.bytes[1] & 0b1100_0000 == 0;
+        if is_extended_seg {
+            panic!("EXTS not handled");
+        }
         match ins.bytes[0] {
             // Rwm #irange2
             0xDC => {
+                // 0x00xx_xxxx - EXTS
+                // 0x01xx_xxxx - EXTP
                 let mut irange = (ins.bytes[1] & 0b0011_0000) >> 4;
                 irange += 1;
                 let reg_v = self.gprs.word_reg_by_idx(ins.bytes[1] & 0x0F).get_raw(&mut self.mem);
-                let page_bytes = u16::from_le_bytes(reg_v[0..2].try_into().unwrap()) & 0b0011_1111;
-                let page = (page_bytes as u32) << 14;
+                let page_bytes = u16::from_le_bytes([reg_v[0], reg_v[1]]);
+                let page = page_bytes;
                 self.extp_value = irange;
                 self.extp_page = page;
                 println!("{} {:08X?}", irange, page);
@@ -1029,8 +1039,8 @@ impl C167 {
             0xD7 => {
                 let mut irange = (ins.bytes[1] & 0b0011_0000) >> 4;
                 irange += 1;
-                let page_bytes = u16::from_le_bytes(ins.bytes[2..].try_into().unwrap()) & 0b0011_1111;
-                let page = (page_bytes as u32) << 14;
+                let page_bytes = u16::from_le_bytes([ins.bytes[2], ins.bytes[3]]);
+                let page = page_bytes;
                 self.extp_value = irange;
                 self.extp_page = page;
             },
