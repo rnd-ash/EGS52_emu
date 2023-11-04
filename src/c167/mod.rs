@@ -30,15 +30,11 @@ pub const DATA_PAGE_SIZE: usize = 0x4000; // 4Kb
  */
 
 fn carry_u16(op1: u16, op2: u16) -> bool {
-    let mask = 0xFFFF;
-    let cmp = op1.wrapping_add(op2);
-    op1 > (cmp & mask)
+    op1 > op1.wrapping_add(op2)
 }
 
 fn carry_u8(op1: u8, op2: u8) -> bool {
-    let mask = 0xFF;
-    let cmp = op1.wrapping_add(op2);
-    op1 > (cmp & mask)
+    op1 > op1.wrapping_add(op2)
 }
 
 fn scarry_u16(op1: u16, op2: u16) -> bool {
@@ -502,24 +498,34 @@ impl C167 {
 
     fn bmov(&mut self, ins: &InstructionInfo, negate: bool) {
         // QQ ZZ qz
+        // Z.z <- Q.q
         let src_byte_addr = self.get_word_offset(ins.bytes[1]);
         let dest_byte_addr = self.get_word_offset(ins.bytes[2]);
 
         let bitoffset_dest = ins.bytes[3] & 0x0F;
         let bitoffset_src = (ins.bytes[3] & 0xF0) >> 4;
 
-        let mut dest = self.read_mem_byte(dest_byte_addr);
-        let mut src = self.read_mem_byte(src_byte_addr);
+        let mut byte_dest = self.read_mem_byte(dest_byte_addr);
+        let byte_src = self.read_mem_byte(src_byte_addr);
+
+        let mut src_bit = byte_src >> bitoffset_src & 0b1;
+
+        let mut psw = self.get_psw_flags();
+        psw.set_e(false);
+        psw.set_c(false);
+        psw.set_v(false);
+        psw.set_n(src_bit != 0);
+        psw.set_z(src_bit == 0);
+        self.set_psw_flags(psw);
+
         if negate {
-            src = !src;
+            src_bit = if src_bit != 0 { 0 } else { 1 }
         }
 
-        let src_bit = src >> bitoffset_src & 0b1;
+        byte_dest &= !(0b1 << bitoffset_dest); // clear old bit
+        byte_dest |= src_bit << bitoffset_dest; // Set new bit
 
-        dest = dest & !(0b1 << bitoffset_dest); // clear old bit
-        dest = dest | (src_bit << bitoffset_dest); // Set new bit
-
-        self.write_mem_byte(dest_byte_addr, dest);
+        self.write_mem_byte(dest_byte_addr, byte_dest);
 
         
     }
@@ -584,7 +590,7 @@ impl C167 {
                 psw.set_z(res == 0);
                 psw.set_v(sborrow_u16(0, op1));
                 psw.set_c(op1 != 0); // anything other than 0 would cause underflow
-                psw.set_n(0 > res as i16);
+                psw.set_n(res >> 15 != 0);
                 self.set_psw_flags(psw);
                 self.gprs.word_reg_by_idx((ins.bytes[1] & 0xF0) >> 4).set_value_word(&mut self.mem, res);
             },
@@ -714,9 +720,11 @@ impl C167 {
             _ => panic!("Invalid operand for MOV {:02X?}", ins.bytes)
         };
         let mut psw = self.get_psw_flags();
+        psw.set_v(false);
+        psw.set_c(false);
         psw.set_e(to_move == 0x8000);
         psw.set_z(to_move == 0);
-        psw.set_n(0 > to_move as i16);
+        psw.set_n(to_move >> 15 != 0);
         self.set_psw_flags(psw);
         self.write_mem_word(dest_addr, to_move);
     }
@@ -843,9 +851,11 @@ impl C167 {
             _ => panic!("Invalid operand for MOV {:02X?}", ins.bytes)
         };
         let mut psw = self.get_psw_flags();
+        psw.set_v(false);
+        psw.set_c(false);
         psw.set_e(to_move == 0x80);
         psw.set_z(to_move == 0);
-        psw.set_n(0 > to_move as i8);
+        psw.set_n(to_move >> 7 != 0);
         self.set_psw_flags(psw);
         self.write_mem_byte(dest_addr, to_move);
     }
@@ -892,7 +902,7 @@ impl C167 {
         let mut psw = self.get_psw_flags();
         psw.set_e(false);
         psw.set_z(op2 == 0);
-        psw.set_n(0 > op2 as i8);
+        psw.set_n(op2 >> 7 != 0);
         self.set_psw_flags(psw);
 
     }
@@ -903,7 +913,7 @@ impl C167 {
             0xC0 => {
                 let reg_m_value = self.gprs.byte_reg_by_idx((ins.bytes[1] & 0xF0) >> 4).get_byte(&mut self.mem);
                 let reg_n = self.gprs.byte_reg_by_idx(ins.bytes[1] & 0x0F);
-                (reg_n.get_addr() as usize, reg_n.get_raw(&mut self.mem), reg_m_value)
+                (reg_n.get_addr() as usize, reg_n.get_value_word(&mut self.mem), reg_m_value)
             },
             // Reg <- mem
             0xC2 => {
@@ -911,14 +921,14 @@ impl C167 {
                 let addr_mem = self.get_mem_address(u16::from_le_bytes(ins.bytes[2..].try_into().unwrap()));
                 let mem_value = self.read_mem_byte(addr_mem);
                 let reg = self.get_register(ins.bytes[1]);
-                let op1 = reg.get_raw(&mut self.mem);
+                let op1 = reg.get_value_word(&mut self.mem);
                 (reg.get_addr() as usize, op1, mem_value)
             },
             // Reg -> mem
             0xC5 => {
                 // Mem is dest
                 let addr_mem = self.get_mem_address(u16::from_le_bytes(ins.bytes[2..].try_into().unwrap()));
-                let mem_value = self.read_mem_raw(addr_mem);
+                let mem_value = self.read_mem_word(addr_mem);
                 let reg = self.get_register(ins.bytes[1]);
                 let reg_value = reg.get_byte(&mut self.mem);
                 (addr_mem, mem_value, reg_value)
@@ -926,17 +936,14 @@ impl C167 {
             _ => panic!("Invalid operand for MOVZ {:02X?}", ins.bytes)
         };
 
-        op1[0] = op2;
-        op1[1] = 0x00;
+        op1 = (op2 as u16) & 0x00FF;
 
         let mut psw = self.get_psw_flags();
         psw.set_e(false);
-        psw.set_z(op2 == 0);
-        psw.set_v(false);
-        psw.set_c(false);
         psw.set_n(false);
+        psw.set_z(op2 == 0);
         self.set_psw_flags(psw);
-        self.write_mem_raw(addr_op1, op1);
+        self.write_mem_word(addr_op1, op1);
 
     }
 
@@ -946,6 +953,7 @@ impl C167 {
      */
 
     fn bclr(&mut self, ins: &InstructionInfo) {
+        // bitaddrQ.q qE QQ
         let bit = (ins.bytes[0] & 0xF0) >> 4;
         let addr = self.get_word_offset(ins.bytes[1]);
         let mut tmp = self.read_mem_word(addr);
@@ -953,66 +961,68 @@ impl C167 {
         tmp = tmp & !(1 << bit);
         let mut psw = self.get_psw_flags();
         psw.set_e(false);
-        psw.set_z(!old_bit == 0);
+        psw.set_z(old_bit == 0); // 1 -> 0 / 0 -> 1
         psw.set_v(false);
         psw.set_c(false);
-        psw.set_n(old_bit == 0);
+        psw.set_n(old_bit != 0); // 1 -> 1 / 0 -> 0
         self.set_psw_flags(psw);
         self.write_mem_word(addr, tmp);
     }
 
     fn bset(&mut self, ins: &InstructionInfo) {
+        // bitaddrQ.q qF QQ
+        let bit = (ins.bytes[0] & 0xF0) >> 4;
         let addr = self.get_word_offset(ins.bytes[1]);
         let mut tmp = self.read_mem_word(addr);
-        let bit = ins.bytes[0] & 0xF0;
-
         let old_bit = tmp >> bit & 0b1;
-
         tmp |= 0b1 << bit;
-
         let mut psw = self.get_psw_flags();
         psw.set_e(false);
-        psw.set_z(!old_bit == 0);
+        psw.set_z(old_bit == 0);
         psw.set_v(false);
         psw.set_c(false);
-        psw.set_n(old_bit == 0);
+        psw.set_n(old_bit != 0);
         self.set_psw_flags(psw);
         self.write_mem_word(addr, tmp);
     }
 
     fn bfldh(&mut self, ins: &InstructionInfo) {
-        // ^ AND
-        // v OR
-        // -| - logically complemented
-        let b_addr = self.get_word_offset(ins.bytes[1]) + 1; // High byte
-        let mut tmp = self.read_mem_byte(b_addr);
-        tmp = (tmp & (0xFF | ins.bytes[2])) | ins.bytes[3];
-        self.write_mem_byte(b_addr, tmp);
+        //  bitoffQ, #mask8, #data8 1A QQ ## @@
+        let mask = ins.bytes[3];
+        let data = ins.bytes[2];
+        let bitoff = self.get_word_offset(ins.bytes[1]);
+        let old_value = self.read_mem_word(bitoff);
+        let full_mask = ((!mask as u16) << 8) | 0xFF;
+        let new_value = (old_value & full_mask) | ((data as u16) << 8);
+
+        self.write_mem_word(bitoff, new_value);
 
         let mut psw = self.get_psw_flags();
         psw.set_e(false);
-        psw.set_z(tmp == 0);
+        psw.set_z(new_value == 0);
         psw.set_v(false);
         psw.set_c(false);
-        psw.set_n(0 > tmp as i8);
+        psw.set_n(new_value >> 15 & 0b1 != 0);
         self.set_psw_flags(psw);
     }   
 
     fn bfldl(&mut self, ins: &InstructionInfo) {
-        // ^ AND
-        // v OR
-        // -| - logically complemented
-        let b_addr = self.get_word_offset(ins.bytes[1]); // Low byte
-        let mut tmp = self.read_mem_byte(b_addr);
-        tmp = (tmp & (0xFF | ins.bytes[2])) | ins.bytes[3];
-        self.write_mem_byte(b_addr, tmp);
+        //  bitoffQ, #mask8, #data8 1A QQ @@ ##
+        let mask = ins.bytes[2];
+        let data = ins.bytes[3];
+        let bitoff = self.get_word_offset(ins.bytes[1]);
+        let old_value = self.read_mem_word(bitoff);
+        let full_mask = 0xFF00 | (!mask as u16);
+        let new_value = (old_value & full_mask) | (data as u16);
+
+        self.write_mem_word(bitoff, new_value);
 
         let mut psw = self.get_psw_flags();
         psw.set_e(false);
-        psw.set_z(tmp == 0);
+        psw.set_z(new_value == 0);
         psw.set_v(false);
         psw.set_c(false);
-        psw.set_n(0 > tmp as i8);
+        psw.set_n(new_value >> 15 & 0b1 != 0);
         self.set_psw_flags(psw);
     }
 
@@ -1050,11 +1060,11 @@ impl C167 {
 
     fn jb(&mut self, ins: &InstructionInfo) {
         // QQ rr q0
-        let value = self.read_mem_byte(self.get_word_offset(ins.bytes[1]));
+        let value = self.read_mem_word(self.get_word_offset(ins.bytes[1]));
         let bit = (ins.bytes[3] & 0xF0) >> 4;
         let relative_offset = (ins.bytes[2] as i8) * 2;
 
-        if value & 1<< bit != 0 {
+        if value >> bit & 0b1 != 0 {
             // Set. Jump
             self.ip = self.ip.wrapping_add_signed(relative_offset as i16);
         }
@@ -1062,7 +1072,7 @@ impl C167 {
 
     fn jnb(&mut self, ins: &InstructionInfo) {
         // QQ rr q0
-        let value = self.read_mem_byte(self.get_word_offset(ins.bytes[1]));
+        let value = self.read_mem_word(self.get_word_offset(ins.bytes[1]));
         let bit = (ins.bytes[3] & 0xF0) >> 4;
         let relative_offset = (ins.bytes[2] as i8) * 2;
 
@@ -1180,14 +1190,21 @@ impl C167 {
         };
 
         match logic_op {
-            LogicalOperation::OR | LogicalOperation::AND => {
+            LogicalOperation::AND => {
                 psw.set_e(op2 == 0x8000);
                 psw.set_z(result == 0);
                 psw.set_v(false);
                 psw.set_c(false);
                 psw.set_n(result >> 15 & 1 != 0)    
             },
-            LogicalOperation::SUB | LogicalOperation::CMP => {
+            LogicalOperation::OR => {
+                psw.set_e(op2 == 0x8000);
+                psw.set_z(result == 0);
+                psw.set_v(false);
+                psw.set_c(false);
+                psw.set_n(result >> 15 & 1 != 0)  
+            },
+            LogicalOperation::CMP => {
                 psw.set_e(op2 == 0x8000);
                 psw.set_z(result == 0);
                 psw.set_v(sborrow_u16(op1, op2));
@@ -1209,6 +1226,13 @@ impl C167 {
                 psw.set_c(scarry_u16(op1 + c, op2) || scarry_u16(op1, op2 + c));
                 psw.set_n(result >> 15 & 1 != 0);
             },
+            LogicalOperation::SUB => {
+                psw.set_e(op2 == 0x8000);
+                psw.set_z(result == 0);
+                psw.set_v(sborrow_u16(op1, op2));
+                psw.set_c(op1 < op2);
+                psw.set_n(result >> 15 & 1 != 0);
+            }
             _ => todo!("PSW flags not implemented for {:?}", logic_op)
         }
         
@@ -1297,14 +1321,21 @@ impl C167 {
         };
 
         match logic_op {
-            LogicalOperation::OR | LogicalOperation::AND => {
+            LogicalOperation::AND => {
                 psw.set_e(op2 == 0x80);
                 psw.set_z(result == 0);
                 psw.set_v(false);
                 psw.set_c(false);
                 psw.set_n(result >> 7 & 1 != 0)    
             },
-            LogicalOperation::SUB | LogicalOperation::CMP => {
+            LogicalOperation::OR => {
+                psw.set_e(op2 == 0x80);
+                psw.set_z(result == 0);
+                psw.set_v(false);
+                psw.set_c(false);
+                psw.set_n(result >> 7 & 1 != 0)  
+            },
+            LogicalOperation::CMP => {
                 psw.set_e(op2 == 0x80);
                 psw.set_z(result == 0);
                 psw.set_v(sborrow_u8(op1, op2));
@@ -1319,13 +1350,20 @@ impl C167 {
                 psw.set_n(result >> 7 & 1 != 0);
             },
             LogicalOperation::ADDC => {
-                let c = psw.c();
+                let c = psw.c() as u8;
                 psw.set_e(op2 == 0x80);
                 psw.set_z(result == 0 && psw.z() != 0);
                 psw.set_v(carry_u8(op1 + c, op2) || carry_u8(op1, op2 + c));
                 psw.set_c(scarry_u8(op1 + c, op2) || scarry_u8(op1, op2 + c));
                 psw.set_n(result >> 7 & 1 != 0);
             },
+            LogicalOperation::SUB => {
+                psw.set_e(op2 == 0x80);
+                psw.set_z(result == 0);
+                psw.set_v(sborrow_u8(op1, op2));
+                psw.set_c(op1 < op2);
+                psw.set_n(result >> 7 & 1 != 0);
+            }
             _ => todo!("PSW flags not implemented for {:?}", logic_op)
         }
         
@@ -1341,9 +1379,9 @@ impl C167 {
         sp -= 2;
 
         let mut psw = self.get_psw_flags();
-        psw.set_e(value as i16 != i16::MIN);
+        psw.set_e(value == 0x8000);
         psw.set_z(value == 0);
-        psw.set_n(value & 1 << 15 != 0);
+        psw.set_n(value >> 15 & 0b1 != 0);
         self.set_psw_flags(psw);
 
         self.write_mem_word(sp as usize, value);
@@ -1356,9 +1394,9 @@ impl C167 {
         sp += 2;
 
         let mut psw = self.get_psw_flags();
-        psw.set_e(value as i16 == i16::MIN);
+        psw.set_e(value == 0x8000);
         psw.set_z(value == 0);
-        psw.set_n(value & 1 << 15 != 0);
+        psw.set_n(value >> 15 & 0b1 != 0);
         self.set_psw_flags(psw);
 
         self.set_stack_pointer(sp);
@@ -1426,7 +1464,7 @@ impl C167 {
         };
 
         let mut psw = self.get_psw_flags();
-        let res = (op1 << op2) | (op1 >> (16-op2));
+        let res = op1.rotate_left(op2 as u32);
         psw.set_e(false);
         psw.set_z(res == 0);
         psw.set_v(false);
@@ -1454,7 +1492,7 @@ impl C167 {
         };
 
         let mut psw = self.get_psw_flags();
-        let res = (op1 >> op2) | (op1 << (16-op2));
+        let res = op1.rotate_right(op2 as u32);
         psw.set_e(false);
         psw.set_z(res == 0);
         psw.set_v((op2 != 0) && ((op1 & ((1 << op1) - 1)) != 0));
@@ -1499,7 +1537,8 @@ impl C167 {
             count -= 1;
             n += 1;
         }
-        psw.set_z(op1 as i16 == 0);
+        psw.set_z(op1 == 0x8000);
+        psw.set_n(op1 >> 15 & 0b1 != 0);
         self.set_psw_flags(psw);
         self.write_mem_word(addr_dest, op1);
     }
@@ -1569,14 +1608,6 @@ impl C167 {
         }
     }
 
-    fn read_mem_raw(&mut self, addr: usize) -> [u8; 2] {
-        if addr > 0x80000 {
-            self.flash[addr..addr+2].try_into().unwrap()
-        } else {
-            self.mem.read(addr as u16, 2).try_into().unwrap()
-        }
-    }
-
     fn read_mem_byte(&mut self, addr: usize) -> u8 {
         if addr > 0x80000 {
             self.flash[addr]
@@ -1590,22 +1621,9 @@ impl C167 {
         self.mem.write(addr as u16, &input.to_le_bytes());
     }
 
-    fn write_mem_raw(&mut self, addr: usize, input: [u8; 2]) {
-        // TODO (Can we write to flash?)
-        self.mem.write(addr as u16, &input);
-    }
-
     fn write_mem_byte(&mut self, addr: usize, input: u8) {
         // TODO (Can we write to flash?)
         self.mem.write(addr as u16, &[input]);
-    }
-
-    pub fn get_mem_region(&mut self, addr: usize, size: usize) -> Vec<u8> {
-        if addr >= 0x80000 {
-            self.flash[addr..addr as usize].to_vec()
-        } else {
-            self.mem.read(addr as u16, size as u16).to_vec()
-        }
     }
 
     pub fn get_mem_region_no_tracking(&self, addr: usize, size: usize) -> Vec<u8> {
@@ -1615,5 +1633,4 @@ impl C167 {
             self.mem.raw[addr..addr+size].to_vec()
         }
     }
-
 }
