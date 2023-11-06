@@ -41,6 +41,16 @@ const GPR_REG_WORD_NAMES: &'static [&'static str] = &[
     "R15"
 ];
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum IndirectType {
+    Normal,
+    PreDecrement,
+    PreIncrease,
+    PostDecrement,
+    PostIncrease,
+    PlusConstant(u16)
+}
+
 #[derive(Debug, Clone)]
 pub struct GPRData {
     pub addr: u16,
@@ -96,12 +106,12 @@ impl GPRData {
         self.words[idx]
     }
 
-    pub fn byte_reg_by_idx<'a>(&'a mut self, id: u8) -> &'a mut Register {
-        &mut self.bytes[id as usize]
+    pub fn byte_reg_by_idx<'a>(&'a mut self, id: u8) -> Register {
+        self.bytes[id as usize]
     }
 
-    pub fn word_reg_by_idx<'a>(&'a mut self, id: u8) -> &'a mut Register {
-        &mut self.words[id as usize]
+    pub fn word_reg_by_idx<'a>(&'a mut self, id: u8) -> Register {
+        self.words[id as usize]
     }
 
     pub fn get_context_pointer(&self) -> u16 {
@@ -117,5 +127,63 @@ impl GPRData {
             self.bytes[f].set_addr(cp + (x/2));
             x += 2;
         }
+    }
+
+    pub fn rw_get_indirect_addr(&self, mem: &mut Memory, id: u8, ty: IndirectType) -> u16 {
+        // GPR Address = (CP) + 2 × Short Address
+        let register = self.words[(id & 0x0F) as usize];
+        let mut addr = register.get_pointer(mem);
+
+        match ty {
+            IndirectType::Normal => {},
+            IndirectType::PreDecrement => {
+                addr -= 2;
+                register.set_pointer(mem, addr);
+            },
+            IndirectType::PreIncrease => {
+                addr += 2;
+                register.set_pointer(mem, addr);
+            },
+            IndirectType::PostDecrement => {
+                register.set_pointer(mem, addr-2);
+            },
+            IndirectType::PostIncrease => {
+                register.set_pointer(mem, addr+2);
+            },
+            IndirectType::PlusConstant(c) => {
+                addr += c;
+            },
+        }
+
+        return addr;
+    }
+
+    pub fn rb_get_indirect_addr(&self, mem: &mut Memory, id: u8, ty: IndirectType) -> u16 {
+        // GPR Address = (CP) + 2 × Short Address
+        let register = self.words[(id & 0x0F) as usize];
+        let mut addr = register.get_pointer(mem);
+
+        match ty {
+            IndirectType::Normal => {},
+            IndirectType::PreDecrement => {
+                addr -= 1;
+                register.set_pointer(mem, addr);
+            },
+            IndirectType::PreIncrease => {
+                addr += 1;
+                register.set_pointer(mem, addr);
+            },
+            IndirectType::PostDecrement => {
+                register.set_pointer(mem, addr-1);
+            },
+            IndirectType::PostIncrease => {
+                register.set_pointer(mem, addr+1);
+            },
+            IndirectType::PlusConstant(c) => {
+                addr += c;
+            },
+        }
+
+        return addr;
     }
 }

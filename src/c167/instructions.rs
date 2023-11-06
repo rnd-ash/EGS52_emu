@@ -390,4 +390,16 @@ impl InstructionInfo {
             instruction,
         },  ip + size))
     }
+
+    pub fn h(&self, idx: usize) -> u8 {
+        (self.bytes[idx] & 0xF0) >> 4
+    }
+
+    pub fn l(&self, idx: usize) -> u8 {
+        self.bytes[idx] & 0x0F
+    }
+
+    pub fn u16(&self, idx: usize) -> u16 {
+        u16::from_le_bytes(self.bytes[idx..].try_into().unwrap())
+    }
 }

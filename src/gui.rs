@@ -49,8 +49,8 @@ impl App {
                     s_i.send(match cpu.exec_step() {
                         Some(i) => {
                             //let ty = i.instruction;
-                            // halt if CALLS
-                            //if cpu.get_instruction_pointer() == 0xA088 {
+                            //// halt if CALLS
+                            //if ty == Instruction::RETS {
                             //    running = false;
                             //}
                             CommandResult::Stepped(i)
@@ -180,6 +180,24 @@ impl eframe::App for App {
                 ui.label(format!("{} - CSP: 0x{:02X?}, IP: 0x{:08X?}", i, entry.csp, entry.ip));
                 i -= 1;
             }
+        });
+
+        Window::new("PSW").show(ctx, |ui| {
+            egui::Grid::new("psw_reg").striped(true).show(ui, |ui| {
+                let psw = cpu_now.get_psw_flags();
+                ui.strong("E");
+                ui.strong("Z");
+                ui.strong("V");
+                ui.strong("C");
+                ui.strong("N");
+                ui.end_row();
+                ui.strong(format!("{}", psw.e() ));
+                ui.strong(format!("{}", psw.z() ));
+                ui.strong(format!("{}", psw.v() ));
+                ui.strong(format!("{}", psw.c() ));
+                ui.strong(format!("{}", psw.n() ));
+                ui.end_row();
+            });
         });
 
         Window::new("GPR Registers").show(ctx, |ui| {

@@ -34,6 +34,10 @@ impl Register {
         u16::from_le_bytes(self.get_raw(mem).try_into().unwrap())
     }
 
+    pub fn get_pointer(&self, mem: &Memory) -> u16 {
+        u16::from_le_bytes(self.get_raw_no_tracking(mem).try_into().unwrap())
+    }
+
     pub fn get_value_word_no_tracking(&self, mem: &Memory) -> u16 {
         u16::from_le_bytes(self.get_raw_no_tracking(mem).try_into().unwrap())
     }
@@ -44,6 +48,10 @@ impl Register {
 
     pub fn set_value_word(&self, mem: &mut Memory, v: u16) {
         mem.set_word_buffer(self.addr_16, v.to_le_bytes())
+    }
+
+    pub fn set_pointer(&self, mem: &mut Memory, ptr: u16) {
+        mem.set_word_buffer_no_tracking(self.addr_16, ptr.to_le_bytes())
     }
 
     /// Only for GPR byte registers
@@ -421,11 +429,11 @@ pub fn esfr_registers<'a>(mem: &mut Memory) -> [Option<Register>; 256] {
         None, // 0xF070
         None, // 0xF072
         None, // 0xF074
-        Some(Register::new("IDMEM2", Some(0x0000), 0xF076, mem)), // 0xF076
-        Some(Register::new("IDPROG", Some(0x0000), 0xF078, mem)), // 0xF078
-        Some(Register::new("IDMEM", Some(0x0000), 0xF07A, mem)), // 0xF07A
-        Some(Register::new("IDCHIP", Some(0x0000), 0xF07C, mem)), // 0xF07C
-        Some(Register::new("IDMANUF", Some(0x0000), 0xF07E, mem)), // 0xF07E
+        Some(Register::new("IDMEM2", Some(0x0501), 0xF076, mem)), // 0xF076
+        Some(Register::new("IDPROG", Some(0x4040), 0xF078, mem)), // 0xF078
+        Some(Register::new("IDMEM", Some(0x3040), 0xF07A, mem)), // 0xF07A
+        Some(Register::new("IDCHIP", Some(0x0C00), 0xF07C, mem)), // 0xF07C
+        Some(Register::new("IDMANUF", Some(0x1820), 0xF07E, mem)), // 0xF07E
 
         Some(Register::new("PCON0L", Some(0x0000), 0xF080, mem)), // 0xF080
         Some(Register::new("PCON0H", Some(0x0000), 0xF082, mem)), // 0xF082
